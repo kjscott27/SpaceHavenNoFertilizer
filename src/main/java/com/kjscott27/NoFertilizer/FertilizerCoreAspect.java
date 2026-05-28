@@ -2,9 +2,13 @@ package com.kjscott27.NoFertilizer;
 
 import com.badlogic.gdx.utils.Array;
 import fi.bugbyte.spacehaven.stuff.Production;
+import fi.bugbyte.spacehaven.world.elements.Storage;
 import fi.bugbyte.spacehaven.world.elements.WorldObject;
 
 import java.lang.reflect.Field;
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -16,68 +20,129 @@ public class FertilizerCoreAspect {
 
     public static final int FERTILIZER_ELEMENT_ID = 2475;
 
-    // global toggle, toggled by clicking the grow rate label in the UI (see FertilizerUIAspect)
+    // Toggle set by clicking the [No Fert] label in the grow bed panel (FertilizerUIAspect).
     public static volatile boolean fertilizerFreeMode = false;
 
+    // Beds whose current growth stage started without fertilizer; they grow at 50% rate.
+    // WeakHashMap: entries are GC'd automatically when a bed is deconstructed.
+    // Synchronized: GrowHub.update() may run on a game thread separate from the UI thread.
+    static final Set<WorldObject.GrowPlace> noFertBeds =
+            Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<WorldObject.GrowPlace, Boolean>()));
 
-    /*  consumeNeeds() checks inv.canConsume(needs) — if ALL needs are present
-        it consumes them and sets canGrow = true.  When the toggle is ON we
-        temporarily remove the fertilizer Need from the list so the check only
-        requires water, then restore it immediately afterwards so game state is
-        not permanently modified. */
+    // Reflection handles for GrowPlace.current and GrowStage.needs, cached after first use.
+    // Looked up on WorldObject.GrowPlace.class directly to survive any AspectJ LTW subclassing.
+    private static volatile Field cachedCurrentField;
+    private static volatile Field cachedNeedsField;
 
-    @Pointcut("execution(void fi.bugbyte.spacehaven.world.elements.WorldObject$GrowPlace.consumeNeeds(fi.bugbyte.spacehaven.world.elements.Storage$Inventory)) && this(growPlace)")
-    public void consumeNeeds(WorldObject.GrowPlace growPlace) {}
+    // Intercepts GrowPlace.consumeNeeds() — called by GrowHub.update() when canGrow is false.
+    // Decides per-bed whether fertilizer is required:
+    //   Toggle OFF / fert present  -> vanilla behaviour; ensure bed is removed from noFertBeds.
+    //   Toggle ON, fert absent    -> temporarily strip the fertilizer Need so the bed
+    //                                passes the water-only check and sets canGrow = true;
+    //                                add to noFertBeds for the 50% rate penalty; restore Need.
+    @Pointcut("execution(void fi.bugbyte.spacehaven.world.elements.WorldObject$GrowPlace.consumeNeeds(fi.bugbyte.spacehaven.world.elements.Storage$Inventory)) && args(inv)")
+    public void consumeNeeds(Storage.Inventory inv) {}
 
-    @Around("consumeNeeds(growPlace)")
-    public Object aroundConsumeNeeds(ProceedingJoinPoint pjp, WorldObject.GrowPlace growPlace) throws Throwable {
+    @Around("consumeNeeds(inv)")
+    public Object aroundConsumeNeeds(ProceedingJoinPoint pjp, Storage.Inventory inv) throws Throwable {
+        WorldObject.GrowPlace growPlace = (WorldObject.GrowPlace) pjp.getThis();
+
         if (!fertilizerFreeMode) {
+            noFertBeds.remove(growPlace);
             return pjp.proceed();
         }
 
-        Production.Need removedNeed = null;
-        Field currentField = null;
-        Field needsField = null;
+        // Resolve and cache Field handles on first invocation.
+        // Always look up on WorldObject.GrowPlace.class so the Field is valid regardless
+        // of any AspectJ subclass that might be created during load-time weaving.
+        Field currentField = cachedCurrentField;
+        Field needsField = cachedNeedsField;
+        Production.Need fertNeed = null;
 
         try {
-            // GrowPlace.current is of type GrowPlace.GrowStage (private inner class)
-            currentField = growPlace.getClass().getDeclaredField("current");
-            currentField.setAccessible(true);
+            if (currentField == null) {
+                currentField = WorldObject.GrowPlace.class.getDeclaredField("current");
+                currentField.setAccessible(true);
+                cachedCurrentField = currentField;
+            }
             Object currentStage = currentField.get(growPlace);
 
             if (currentStage != null) {
-                needsField = currentStage.getClass().getDeclaredField("needs");
-                needsField.setAccessible(true);
+                if (needsField == null) {
+                    needsField = currentStage.getClass().getDeclaredField("needs");
+                    needsField.setAccessible(true);
+                    cachedNeedsField = needsField;
+                }
 
                 @SuppressWarnings("unchecked")
                 Array<Production.Need> needs = (Array<Production.Need>) needsField.get(currentStage);
 
                 if (needs != null) {
                     for (int i = 0; i < needs.size; i++) {
-                        if (needs.get(i).element == FERTILIZER_ELEMENT_ID) {
-                            removedNeed = needs.removeIndex(i);
+                        Production.Need n = needs.get(i);
+                        if (n != null && n.element == FERTILIZER_ELEMENT_ID) {
+                            fertNeed = n;
                             break;
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            // Reflection failed — fall back to vanilla behaviour so nothing breaks
+            // Reflection failed — fall back to vanilla (bed not tracked)
+            noFertBeds.remove(growPlace);
+            return pjp.proceed();
+        }
+
+        // No fertilizer Need in this stage — proceed normally
+        if (fertNeed == null) {
+            noFertBeds.remove(growPlace);
+            return pjp.proceed();
+        }
+
+        // Use the game's own canConsume logic to determine if fertilizer is available
+        if (inv.canConsume(fertNeed)) {
+            // Fertilizer available — consume normally, full rate
+            noFertBeds.remove(growPlace);
+            return pjp.proceed();
+        }
+
+        // Fertilizer absent — mark bed for 50% penalty, strip Need so remaining needs are checked
+        noFertBeds.add(growPlace);
+
+        boolean removed = false;
+        try {
+            Object currentStage = currentField.get(growPlace);
+            if (currentStage != null && needsField != null) {
+                @SuppressWarnings("unchecked")
+                Array<Production.Need> needs = (Array<Production.Need>) needsField.get(currentStage);
+                if (needs != null) {
+                    for (int i = 0; i < needs.size; i++) {
+                        Production.Need n = needs.get(i);
+                        if (n != null && n.element == FERTILIZER_ELEMENT_ID) {
+                            needs.removeIndex(i);
+                            removed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            noFertBeds.remove(growPlace);
             return pjp.proceed();
         }
 
         try {
             return pjp.proceed();
         } finally {
-            // Always restore the Need so the crop's stage definition stays intact
-            if (removedNeed != null && currentField != null && needsField != null) {
+            // Restore the Need so the crop stage definition is not permanently altered
+            if (removed) {
                 try {
                     Object currentStage = currentField.get(growPlace);
-                    if (currentStage != null) {
+                    if (currentStage != null && needsField != null) {
                         @SuppressWarnings("unchecked")
                         Array<Production.Need> needs = (Array<Production.Need>) needsField.get(currentStage);
                         if (needs != null) {
-                            needs.add(removedNeed);
+                            needs.add(fertNeed);
                         }
                     }
                 } catch (Exception ignored) {}
@@ -86,13 +151,11 @@ public class FertilizerCoreAspect {
     }
 
 
-    /*  GrowHub.getAllNeeds() aggregates every need from every GrowPlace and is
-        called by JobManager.checkMissingRes() to:
-          (a) set the per-facility NoRes icon on the grow-bed building
-          (b) count the facility in the ship-level "INSUFFICIENT RESOURCES (N)" banner
-        When the toggle is ON we strip fertilizer from the returned list so neither
-        of those indicators fires due to missing fertilizer. */
-
+    // getAllNeeds() is called by JobManager.checkMissingRes() to set the per-facility
+    // NoRes icon and the ship-level "INSUFFICIENT RESOURCES" banner. Strip fertilizer
+    // from the result when the toggle is ON so neither indicator fires for missing fertilizer.
+    // Note: getAllNeeds() rebuilds its internal array each call (allNeeds.clear()), so
+    // mutating the returned list is safe. Crew hauling is unaffected — it uses getNextNeeds().
     @Pointcut("execution(com.badlogic.gdx.utils.Array fi.bugbyte.spacehaven.world.elements.WorldObject$GrowHub.getAllNeeds())")
     public void growHubGetAllNeeds() {}
 
@@ -111,19 +174,17 @@ public class FertilizerCoreAspect {
     }
 
 
-    /*  Halving the upgrade value multiplier is equivalent to halving the entire
-        final growth rate, because it is the last factor applied.  This preserves
-        the full contribution of light, CO2, tending skill, and researched upgrades.
-        Final formula with toggle ON:
-        effectiveRate = (light * co2 * skill * researchUpgrade) * 0.5 */
+    // getUpgradeValue() is the last factor applied to the growth rate inside GrowPlace.update().
+    // Halving it here halves the final effective rate while preserving all other factors
+    // (light, CO2, skill, research). Only applied to beds in noFertBeds — those whose current
+    // stage started without fertilizer (recorded by consumeNeeds interception above).
+    @Pointcut("call(float fi.bugbyte.spacehaven.world.World.getUpgradeValue(fi.bugbyte.spacehaven.stuff.ResearchUnlocks$UpgradeType, fi.bugbyte.spacehaven.stuff.FactionUtils$FactionSide)) && withincode(void fi.bugbyte.spacehaven.world.elements.WorldObject$GrowPlace.update(float)) && this(growPlace)")
+    public void growPlaceUpgradeValue(WorldObject.GrowPlace growPlace) {}
 
-    @Pointcut("call(float fi.bugbyte.spacehaven.world.World.getUpgradeValue(fi.bugbyte.spacehaven.stuff.ResearchUnlocks$UpgradeType, fi.bugbyte.spacehaven.stuff.FactionUtils$FactionSide)) && withincode(void fi.bugbyte.spacehaven.world.elements.WorldObject$GrowPlace.update(float))")
-    public void growPlaceUpgradeValue() {}
-
-    @Around("growPlaceUpgradeValue()")
-    public Object aroundGrowPlaceUpgradeValue(ProceedingJoinPoint pjp) throws Throwable {
+    @Around("growPlaceUpgradeValue(growPlace)")
+    public Object aroundGrowPlaceUpgradeValue(ProceedingJoinPoint pjp, WorldObject.GrowPlace growPlace) throws Throwable {
         float result = (Float) pjp.proceed();
-        if (fertilizerFreeMode) {
+        if (fertilizerFreeMode && noFertBeds.contains(growPlace)) {
             return result * 0.5f;
         }
         return result;

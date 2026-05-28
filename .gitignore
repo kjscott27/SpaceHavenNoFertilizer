@@ -27,3 +27,4 @@ target/
 .DS_Store
 spacehaven.jar
 decompiled/
+docs/

@@ -14,21 +14,14 @@ import org.aspectj.lang.annotation.Pointcut;
 @Aspect
 public class FertilizerUIAspect {
 
-    /**
-     * Cached screen-space position of the grow rate label, updated every time
-     * updateGrowRate() runs (~every 2 seconds).  Used for click-region detection.
-     */
+    // Screen-space position of the grow rate label, updated each time updateGrowRate() runs.
+    // Used to define the click region for the toggle.
     private static volatile float cachedGrowRateX = 0f;
     private static volatile float cachedGrowRateY = 0f;
 
-    /*  GrowBedSettings.updateGrowRate() builds the string: "Growth Rate: 100.0 %"
-        and stores it in the private field `growRate`.
-
-        We reflect into the GrowBedSettings instance after the method runs and
-        append "  [No Fert: ON/OFF]" so it reads:
-        "Growth Rate: 100.0 %  [No Fert: OFF]"
-
-        We also cache growRateX/growRateY for the click-region check below. */
+    // Intercepts GrowBedSettings.updateGrowRate() after it builds the "Growth Rate: xx.x %"
+    // label. Appends "  [No Fert: ON/OFF]" to the string via reflection and caches the
+    // label's screen coordinates for the touch handler below.
 
     @Pointcut("execution(void fi.bugbyte.spacehaven.gui.WorldElementInfos$GrowBedSettings.updateGrowRate())")
     public void updateGrowRate() {}
@@ -60,12 +53,10 @@ public class FertilizerUIAspect {
         } catch (Exception ignored) {}
     }
 
-    /*  The label is drawn at (cachedGrowRateX, cachedGrowRateY).
-        "Growth Rate: xx.x %  " is approximately 180px wide at uiScale = 1.
-        The "[No Fert: OFF]" / "[No Fert: ON]" text is ~130px wide at uiScale = 1.
-        The click region covers that right-hand portion.
-        LibGDX y is baseline-up, so the hit box spans -18..+4 pixels around
-        the baseline y. */
+    // Intercepts GrowBedSettings.touchDown(). The "Growth Rate" text is ~180px wide at
+    // uiScale=1; the appended "[No Fert: ...]" badge covers the next ~130px. A click
+    // anywhere in that badge region flips the toggle. LibGDX y is baseline-up, so the
+    // hit box spans -18..+4px around the label baseline.
 
     @Pointcut("execution(boolean fi.bugbyte.spacehaven.gui.WorldElementInfos$GrowBedSettings.touchDown(float, float, int, int)) && args(x, y, pointer, button)")
     public void growBedTouchDown(float x, float y, int pointer, int button) {}
