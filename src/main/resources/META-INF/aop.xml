@@ -1,0 +1,10 @@
+<aspectj>
+    <aspects>
+        <aspect name="com.kjscott27.NoFertilizer.FertilizerCoreAspect" />
+        <aspect name="com.kjscott27.NoFertilizer.FertilizerUIAspect" />
+    </aspects>
+
+    <weaver options="-verbose -showWeaveInfo">
+        <include within="fi.bugbyte..*" />
+    </weaver>
+</aspectj>
