@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.kjscott27</groupId>
     <artifactId>NoFertilizer</artifactId>
-    <version>0.0.1-LTW</version>
+    <version>0.0.2-LTW</version>
 
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>

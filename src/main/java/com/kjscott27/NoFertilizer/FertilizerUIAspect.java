@@ -21,17 +21,14 @@ public class FertilizerUIAspect {
     private static volatile float cachedGrowRateX = 0f;
     private static volatile float cachedGrowRateY = 0f;
 
-    // -------------------------------------------------------------------------
-    // 1. Append the toggle indicator to the grow-rate label text
-    //
-    //    GrowBedSettings.updateGrowRate() builds the string:
-    //      "Growth Rate: 100.0 %"
-    //    and stores it in the private field `growRate`.
-    //    We reflect into the GrowBedSettings instance after the method runs and
-    //    append "  [No Fert: ON/OFF]" so it reads:
-    //      "Growth Rate: 100.0 %  [No Fert: OFF]"
-    //    We also cache growRateX/growRateY for the click-region check below.
-    // -------------------------------------------------------------------------
+    /*  GrowBedSettings.updateGrowRate() builds the string: "Growth Rate: 100.0 %"
+        and stores it in the private field `growRate`.
+
+        We reflect into the GrowBedSettings instance after the method runs and
+        append "  [No Fert: ON/OFF]" so it reads:
+        "Growth Rate: 100.0 %  [No Fert: OFF]"
+
+        We also cache growRateX/growRateY for the click-region check below. */
 
     @Pointcut("execution(void fi.bugbyte.spacehaven.gui.WorldElementInfos$GrowBedSettings.updateGrowRate())")
     public void updateGrowRate() {}
@@ -63,19 +60,12 @@ public class FertilizerUIAspect {
         } catch (Exception ignored) {}
     }
 
-    // -------------------------------------------------------------------------
-    // 2. Handle clicks on the "[No Fert: ...]" portion of the grow-rate label
-    //
-    //    The label is drawn at (cachedGrowRateX, cachedGrowRateY).
-    //    "Growth Rate: xx.x %  " is approximately 180px wide at uiScale = 1.
-    //    The "[No Fert: OFF]" / "[No Fert: ON]" text is ~130px wide at uiScale = 1.
-    //    The click region covers that right-hand portion.
-    //    LibGDX y is baseline-up, so the hit box spans -18..+4 pixels around
-    //    the baseline y.
-    //
-    //    If the click lands inside that region the toggle flips and we return
-    //    false (click consumed).  Otherwise the original touchDown logic runs.
-    // -------------------------------------------------------------------------
+    /*  The label is drawn at (cachedGrowRateX, cachedGrowRateY).
+        "Growth Rate: xx.x %  " is approximately 180px wide at uiScale = 1.
+        The "[No Fert: OFF]" / "[No Fert: ON]" text is ~130px wide at uiScale = 1.
+        The click region covers that right-hand portion.
+        LibGDX y is baseline-up, so the hit box spans -18..+4 pixels around
+        the baseline y. */
 
     @Pointcut("execution(boolean fi.bugbyte.spacehaven.gui.WorldElementInfos$GrowBedSettings.touchDown(float, float, int, int)) && args(x, y, pointer, button)")
     public void growBedTouchDown(float x, float y, int pointer, int button) {}

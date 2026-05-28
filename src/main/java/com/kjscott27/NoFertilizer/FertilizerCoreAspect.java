@@ -86,6 +86,31 @@ public class FertilizerCoreAspect {
     }
 
 
+    /*  GrowHub.getAllNeeds() aggregates every need from every GrowPlace and is
+        called by JobManager.checkMissingRes() to:
+          (a) set the per-facility NoRes icon on the grow-bed building
+          (b) count the facility in the ship-level "INSUFFICIENT RESOURCES (N)" banner
+        When the toggle is ON we strip fertilizer from the returned list so neither
+        of those indicators fires due to missing fertilizer. */
+
+    @Pointcut("execution(com.badlogic.gdx.utils.Array fi.bugbyte.spacehaven.world.elements.WorldObject$GrowHub.getAllNeeds())")
+    public void growHubGetAllNeeds() {}
+
+    @Around("growHubGetAllNeeds()")
+    public Object aroundGrowHubGetAllNeeds(ProceedingJoinPoint pjp) throws Throwable {
+        @SuppressWarnings("unchecked")
+        Array<Production.Need> result = (Array<Production.Need>) pjp.proceed();
+        if (fertilizerFreeMode && result != null) {
+            for (int i = result.size - 1; i >= 0; i--) {
+                if (result.get(i).element == FERTILIZER_ELEMENT_ID) {
+                    result.removeIndex(i);
+                }
+            }
+        }
+        return result;
+    }
+
+
     /*  Halving the upgrade value multiplier is equivalent to halving the entire
         final growth rate, because it is the last factor applied.  This preserves
         the full contribution of light, CO2, tending skill, and researched upgrades.
