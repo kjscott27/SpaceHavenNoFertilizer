@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.kjscott27</groupId>
     <artifactId>NoFertilizer</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
 
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
@@ -22,7 +22,7 @@
         <dependency>
             <groupId>fi.bugbyte</groupId>
             <artifactId>spacehaven</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
         </dependency>
 
         <dependency>
