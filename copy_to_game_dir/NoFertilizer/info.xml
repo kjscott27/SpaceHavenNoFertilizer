@@ -2,7 +2,7 @@
 <name>NoFertilizer</name>
 <author>kjscott27</author>
 <minimumLoaderVersion>0.12.4</minimumLoaderVersion>
-<version>1.0.1</version>
+<version>1.0.2</version>
 <gameVersions>1.00.0</gameVersions>
 <author>kJs-</author>
 <modid>979110</modid>
@@ -11,6 +11,8 @@ Allows crops to grow without fertilizer at 50% growth rate. You can access the t
     
 If fertilizer is available it will still be consumed to return the plant growth back to 100% (or more as intended by your research bonuses).
 Additionally, when the toggle is on it will hide any in game notifications for missing Fertilizer during the growth of your plants.
+
+If you disable the mod, the toggle will be turned off and your plants that do not have fertilizer will stop growing.
 
 Does need to be enabled each time you load your save, it will not save the toggle state.
 </description>

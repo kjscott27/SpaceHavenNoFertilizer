@@ -33,6 +33,8 @@ public class FertilizerCoreAspect {
     // Looked up on WorldObject.GrowPlace.class directly to survive any AspectJ LTW subclassing.
     private static volatile Field cachedCurrentField;
     private static volatile Field cachedNeedsField;
+    // Reflection handle for GrowPlace.canGrow boolean — used to force re-evaluation when mode turns OFF.
+    private static volatile Field cachedCanGrowField;
 
     // Intercepts GrowPlace.consumeNeeds() — called by GrowHub.update() when canGrow is false.
     // Decides per-bed whether fertilizer is required:
@@ -174,6 +176,23 @@ public class FertilizerCoreAspect {
     }
 
 
+    // Forces GrowPlace.canGrow back to false so GrowHub.update() calls consumeNeeds() again on
+    // the next tick, re-evaluating whether fertilizer is present after the mode is turned off.
+    private static void resetCanGrow(WorldObject.GrowPlace growPlace) {
+        try {
+            Field f = cachedCanGrowField;
+            if (f == null) {
+                f = WorldObject.GrowPlace.class.getDeclaredField("canGrow");
+                f.setAccessible(true);
+                cachedCanGrowField = f;
+            }
+            f.set(growPlace, false);
+        } catch (Exception e) {
+            System.err.println("[NoFertilizer] resetCanGrow failed: " + e);
+        }
+    }
+
+
     // getUpgradeValue() is the last factor applied to the growth rate inside GrowPlace.update().
     // Halving it here halves the final effective rate while preserving all other factors
     // (light, CO2, skill, research). Only applied to beds in noFertBeds — those whose current
@@ -186,6 +205,12 @@ public class FertilizerCoreAspect {
         float result = (Float) pjp.proceed();
         if (fertilizerFreeMode && noFertBeds.contains(growPlace)) {
             return result * 0.5f;
+        }
+        // Mode was turned OFF while this bed was growing without fertilizer.
+        // Reset canGrow so GrowHub.update() calls consumeNeeds() again on the next tick,
+        // which will re-evaluate whether fertilizer is present and stall the plant if it isn't.
+        if (!fertilizerFreeMode && noFertBeds.remove(growPlace)) {
+            resetCanGrow(growPlace);
         }
         return result;
     }
