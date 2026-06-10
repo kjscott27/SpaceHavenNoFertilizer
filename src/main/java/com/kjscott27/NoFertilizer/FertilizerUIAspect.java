@@ -1,80 +1,62 @@
 package com.kjscott27.NoFertilizer;
 
-import fi.bugbyte.framework.Settings;
+import fi.bugbyte.framework.screen.StageButton;
+import fi.bugbyte.gen.compiled.ToggleTextIconButton1;
+import fi.bugbyte.gen.compiled.ToggleTextIconButtons1;
+import fi.bugbyte.spacehaven.gui.MenuSystem;
+import fi.bugbyte.spacehaven.gui.MenuSystemItems;
+import fi.bugbyte.spacehaven.gui.WorldElementInfos;
 
 import java.lang.reflect.Field;
 
 import org.aspectj.lang.JoinPoint;
-import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.After;
-import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 
 @Aspect
 public class FertilizerUIAspect {
 
-    // Screen-space position of the grow rate label, updated each time updateGrowRate() runs.
-    // Used to define the click region for the toggle.
-    private static volatile float cachedGrowRateX = 0f;
-    private static volatile float cachedGrowRateY = 0f;
+    // Intercepts SingleWorldElementSelected.open() — the method the game calls when any
+    // facility is selected and its command bar is being built (same lifecycle point used by
+    // LOGISTICS, PAUSE, DISMANTLE, etc.). We inspect CollectedFacilityInfo.growPlaces via
+    // reflection; if non-null the selected element is a grow bed and we inject our toggle.
 
-    // Intercepts GrowBedSettings.updateGrowRate() after it builds the "Growth Rate: xx.x %"
-    // label. Appends "  [No Fert: ON/OFF]" to the string via reflection and caches the
-    // label's screen coordinates for the touch handler below.
+    @Pointcut("execution(* fi.bugbyte.spacehaven.gui.MenuSystemItems$SingleWorldElementSelected.open(..))")
+    public void singleElementOpen() {}
 
-    @Pointcut("execution(void fi.bugbyte.spacehaven.gui.WorldElementInfos$GrowBedSettings.updateGrowRate())")
-    public void updateGrowRate() {}
-
-    @After("updateGrowRate()")
-    public void afterUpdateGrowRate(JoinPoint joinPoint) {
-        Object target = joinPoint.getThis();
-        if (target == null) return;
-
+    @After("singleElementOpen()")
+    public void afterOpen(JoinPoint jp) {
         try {
-            Class<?> cls = target.getClass();
+            MenuSystemItems.SingleWorldElementSelected sel =
+                    (MenuSystemItems.SingleWorldElementSelected) jp.getThis();
 
-            Field growRateField = cls.getDeclaredField("growRate");
-            growRateField.setAccessible(true);
-            String growRate = (String) growRateField.get(target);
+            WorldElementInfos.CollectedFacilityInfo info = sel.getCollectedInfo();
+            if (info == null) return;
 
-            Field growRateXField = cls.getDeclaredField("growRateX");
-            growRateXField.setAccessible(true);
-            cachedGrowRateX = (float) growRateXField.get(target);
+            // growPlaces is package-private — reflect to check if this is a grow bed
+            Field growPlacesField = info.getClass().getDeclaredField("growPlaces");
+            growPlacesField.setAccessible(true);
+            if (growPlacesField.get(info) == null) return;
 
-            Field growRateYField = cls.getDeclaredField("growRateY");
-            growRateYField.setAccessible(true);
-            cachedGrowRateY = (float) growRateYField.get(target);
+            MenuSystem.SelectionBox box = (MenuSystem.SelectionBox) jp.getArgs()[0];
 
-            if (growRate != null) {
-                String status = FertilizerCoreAspect.fertilizerFreeMode ? "ON" : "OFF";
-                growRateField.set(target, growRate + "  [No Fert: " + status + "]");
-            }
-        } catch (Exception ignored) {}
-    }
+            final ToggleTextIconButton1 btn = ToggleTextIconButtons1.getFacilityNoRefill();
+            btn.setText("NO FERT");
+            btn.setHoldDown(FertilizerCoreAspect.fertilizerFreeMode);
 
-    // Intercepts GrowBedSettings.touchDown(). The "Growth Rate" text is ~180px wide at
-    // uiScale=1; the appended "[No Fert: ...]" badge covers the next ~130px. A click
-    // anywhere in that badge region flips the toggle. LibGDX y is baseline-up, so the
-    // hit box spans -18..+4px around the label baseline.
+            btn.setClickHandler(new StageButton.clickHandler() {
+                @Override
+                public void clicked() {
+                    FertilizerCoreAspect.fertilizerFreeMode = !FertilizerCoreAspect.fertilizerFreeMode;
+                    btn.setHoldDown(FertilizerCoreAspect.fertilizerFreeMode);
+                }
+            });
 
-    @Pointcut("execution(boolean fi.bugbyte.spacehaven.gui.WorldElementInfos$GrowBedSettings.touchDown(float, float, int, int)) && args(x, y, pointer, button)")
-    public void growBedTouchDown(float x, float y, int pointer, int button) {}
+            box.getMenuSystem().addCommandButton((StageButton) btn);
 
-    @Around("growBedTouchDown(x, y, pointer, button)")
-    public Object aroundTouchDown(ProceedingJoinPoint pjp, float x, float y, int pointer, int button) throws Throwable {
-        float scale = Settings.uiScale;
-
-        float hitX1 = cachedGrowRateX + 180f * scale;
-        float hitX2 = hitX1 + 130f * scale;
-        float hitY1 = cachedGrowRateY - 18f * scale;
-        float hitY2 = cachedGrowRateY + 4f * scale;
-
-        if (x >= hitX1 && x <= hitX2 && y >= hitY1 && y <= hitY2) {
-            FertilizerCoreAspect.fertilizerFreeMode = !FertilizerCoreAspect.fertilizerFreeMode;
-            return false;
+        } catch (Exception e) {
+            System.err.println("[NoFertilizer] Error adding NO FERT button: " + e);
         }
-
-        return pjp.proceed();
     }
 }
